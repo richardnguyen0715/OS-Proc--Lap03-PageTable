@@ -12,6 +12,7 @@ struct proc proc[NPROC];
 
 struct proc *initproc;
 
+ 
 int nextpid = 1;
 struct spinlock pid_lock;
 
@@ -102,6 +103,7 @@ allocpid()
   return pid;
 }
 
+
 // Look in the process table for an UNUSED proc.
 // If found, initialize state required to run in the kernel,
 // and return with p->lock held.
@@ -110,7 +112,6 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
-
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     if(p->state == UNUSED) {
@@ -132,6 +133,12 @@ found:
     return 0;
   }
 
+  if ((p->usyscall = (struct usyscall *) kalloc()) == 0) {
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -145,7 +152,7 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
+  p->usyscall->pid = p->pid;
   return p;
 }
 
@@ -158,6 +165,10 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+  if (p->usyscall) {
+        kfree((void *) p->usyscall);
+  }
+  p->usyscall = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
@@ -171,6 +182,7 @@ freeproc(struct proc *p)
   p->state = UNUSED;
 }
 
+#define USYSCALL (TRAPFRAME - PGSIZE)
 // Create a user page table for a given process, with no user memory,
 // but with trampoline and trapframe pages.
 pagetable_t
@@ -202,6 +214,14 @@ proc_pagetable(struct proc *p)
     return 0;
   }
 
+  if (mappages(pagetable, USYSCALL, PGSIZE,
+              (uint64) (p->usyscall), PTE_R | PTE_U) < 0) {
+    uvmunmap(pagetable, TRAPFRAME, 1, 0);
+    uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+    uvmfree(pagetable, 0);
+    return 0;
+  } 
+
   return pagetable;
 }
 
@@ -212,6 +232,7 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  uvmunmap(pagetable, USYSCALL, 1, 0);
   uvmfree(pagetable, sz);
 }
 
@@ -501,7 +522,74 @@ sched(void)
     panic("sched running");
   if(intr_get())
     panic("sched interruptible");
+// Physical memory layout
 
+// qemu -machine virt is set up like this,
+// based on qemu's hw/riscv/virt.c:
+//
+// 00001000 -- boot ROM, provided by qemu
+// 02000000 -- CLINT
+// 0C000000 -- PLIC
+// 10000000 -- uart0 
+// 10001000 -- virtio disk 
+// 80000000 -- boot ROM jumps here in machine mode
+//             -kernel loads the kernel here
+// unused RAM after 80000000.
+
+// the kernel uses physical memory thus:
+// 80000000 -- entry.S, then kernel text and data
+// end -- start of kernel page allocation area
+// PHYSTOP -- end RAM used by the kernel
+
+// qemu puts UART registers here in physical memory.
+#define UART0 0x10000000L
+#define UART0_IRQ 10
+
+// virtio mmio interface
+#define VIRTIO0 0x10001000
+#define VIRTIO0_IRQ 1
+
+#ifdef LAB_NET
+#define E1000_IRQ 33
+#endif
+
+// qemu puts platform-level interrupt controller (PLIC) here.
+#define PLIC 0x0c000000L
+#define PLIC_PRIORITY (PLIC + 0x0)
+#define PLIC_PENDING (PLIC + 0x1000)
+#define PLIC_SENABLE(hart) (PLIC + 0x2080 + (hart)*0x100)
+#define PLIC_SPRIORITY(hart) (PLIC + 0x201000 + (hart)*0x2000)
+#define PLIC_SCLAIM(hart) (PLIC + 0x201004 + (hart)*0x2000)
+
+// the kernel expects there to be RAM
+// for use by the kernel and user pages
+// from physical address 0x80000000 to PHYSTOP.
+#define KERNBASE 0x80000000L
+#define PHYSTOP (KERNBASE + 128*1024*1024)
+
+// map the trampoline page to the highest address,
+// in both user and kernel space.
+#define TRAMPOLINE (MAXVA - PGSIZE)
+
+// map kernel stacks beneath the trampoline,
+// each surrounded by invalid guard pages.
+#define KSTACK(p) (TRAMPOLINE - (p)*2*PGSIZE - 3*PGSIZE)
+
+// User memory layout.
+// Address zero first:
+//   text
+//   original data and bss
+//   fixed-size stack
+//   expandable heap
+//   ...
+//   USYSCALL (shared with kernel)
+//   TRAPFRAME (p->trapframe, used by the trampoline)
+//   TRAMPOLINE (the same page as in the kernel)
+#define TRAPFRAME (TRAMPOLINE - PGSIZE)
+#define USYSCALL (TRAPFRAME - PGSIZE)
+struct usyscall {
+  int pid;  // Process ID
+};
   intena = mycpu()->intena;
   swtch(&p->context, &mycpu()->context);
   mycpu()->intena = intena;
