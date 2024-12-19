@@ -1,8 +1,8 @@
 
 xv6 kernel is booting
 
-hart 2 starting
 hart 1 starting
+hart 2 starting
 page table 0x0000000087f6b000
  ..0: pte 0x0000000021fd9c01 pa 0x0000000087f67000
  .. ..0: pte 0x0000000021fd9801 pa 0x0000000087f66000
@@ -23,4 +23,4 @@ test copyout: usertrap(): unexpected scause 0x0000000000000002 pid=6
             sepc=0x00000000000006ea stval=0x0000000000003220
 FAILED
 SOME TESTS FAILED
-$ qemu-system-riscv64: terminating on signal 15 from pid 3662 (make)
+$ qemu-system-riscv64: terminating on signal 15 from pid 2407 (make)
