@@ -1,0 +1,14 @@
+Các lệnh gọi hệ thống khác có thể được tối ưu hóa:
+1. uptime():
+    Return: Hàm này trả về thời gian hệ thống đã chạy từ khi khởi động.
+    Cách thức tối ưu hóa: Lưu giá trị ticks vào trang chia sẻ, cập nhật giá trị này khi bộ đếm hệ thống tăng. 
+    Điều này giúp loại bỏ nhu cầu chuyển qua không gian kernel.
+2. getuid() và getgid():
+    Return: Trả về UID (User ID) và GID (Group ID) của tiến trình.
+    Cách thức tối ưu hóa: Lưu UID và GID vào trang chia sẻ luôn.
+3. gettimeofday():
+    Return: Trả vè thời gian hiện tại (trên thực tế)
+    Cách thức tối ưu hóa: Lưu timestamp hệ thống ( hoặc một bộ đếm nào đó ) vào cùng trang chia sẽ.
+4. getpid():
+    Return: Hàm này trả về PID của tiến trình cha.
+    Cách thức tối ưu hóa: Lưu PID của tiến trình cha này vào trong cùng trang chia sẽ luôn.
